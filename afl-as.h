@@ -383,6 +383,8 @@ static const u8* main_payload_32 =
 #ifdef __APPLE__
 #  define CALL_L64(str)		"call _" str "\n"
 #else
+// procedure linkage table: <https://stackoverflow.com/a/5469334>
+// <http://dustin.schultz.io/how-is-glibc-loaded-at-runtime.html>
 #  define CALL_L64(str)		"call " str "@PLT\n"
 #endif /* ^__APPLE__ */
 
@@ -401,39 +403,39 @@ static const u8* main_payload_64 =
 #if defined(__OpenBSD__)  || (defined(__FreeBSD__) && (__FreeBSD__ < 9))
   "  .byte 0x9f /* lahf */\n"
 #else
-  "  lahf\n"
+  "  lahf\n"        // copy lower bits of flag register to AH
 #endif /* ^__OpenBSD__, etc */
-  "  seto  %al\n"
+  "  seto  %al\n"   // set al to 1 if overflow flag is set
   "\n"
   "  /* Check if SHM region is already mapped. */\n"
   "\n"
-  "  movq  __afl_area_ptr(%rip), %rdx\n"
-  "  testq %rdx, %rdx\n"
-  "  je    __afl_setup\n"
+  "  movq  __afl_area_ptr(%rip), %rdx\n"   // rip-relative addressing: https://en.wikipedia.org/wiki/Addressing_mode#PC-relative_2
+  "  testq %rdx, %rdx\n"   // check if area pointer is null or not: https://stackoverflow.com/q/147173
+  "  je    __afl_setup\n"  // jump to setup code if null (0)
   "\n"
   "__afl_store:\n"
   "\n"
   "  /* Calculate and store hit for the code location specified in rcx. */\n"
   "\n"
 #ifndef COVERAGE_ONLY
-  "  xorq __afl_prev_loc(%rip), %rcx\n"
-  "  xorq %rcx, __afl_prev_loc(%rip)\n"
-  "  shrq $1, __afl_prev_loc(%rip)\n"
+  "  xorq __afl_prev_loc(%rip), %rcx\n"   // rcx = rcx ^ __afl_prev_loc
+  "  xorq %rcx, __afl_prev_loc(%rip)\n"   // copy old value of rcx to __afl_prev_loc
+  "  shrq $1, __afl_prev_loc(%rip)\n"     // __afl_prev_loc = __afl_prev_loc >> 1
 #endif /* ^!COVERAGE_ONLY */
   "\n"
 #ifdef SKIP_COUNTS
   "  orb  $1, (%rdx, %rcx, 1)\n"
 #else
-  "  incb (%rdx, %rcx, 1)\n"
+  "  incb (%rdx, %rcx, 1)\n"  // increment memory address rdx+rcx*1
 #endif /* ^SKIP_COUNTS */
   "\n"
   "__afl_return:\n"
   "\n"
-  "  addb $127, %al\n"
+  "  addb $127, %al\n"   // why?
 #if defined(__OpenBSD__)  || (defined(__FreeBSD__) && (__FreeBSD__ < 9))
   "  .byte 0x9e /* sahf */\n"
 #else
-  "  sahf\n"
+  "  sahf\n"   // restore FLAGS from AH register
 #endif /* ^__OpenBSD__, etc */
   "  ret\n"
   "\n"
@@ -498,12 +500,15 @@ static const u8* main_payload_64 =
   "  /* The 64-bit ABI requires 16-byte stack alignment. We'll keep the\n"
   "     original stack ptr in the callee-saved r12. */\n"
   "\n"
-  "  pushq %r12\n"
+  "  pushq %r12\n"   // store r12 on stack
   "  movq  %rsp, %r12\n"
-  "  subq  $16, %rsp\n"
-  "  andq  $0xfffffffffffffff0, %rsp\n"
+  "  subq  $16, %rsp\n"  // rsp -= 16, why?
+  "  andq  $0xfffffffffffffff0, %rsp\n"  // zero last 4 bits of rsp
   "\n"
-  "  leaq .AFL_SHM_ENV(%rip), %rdi\n"
+// SystemV amd64 ABI calling convention uses RDI, RSI, RDX,... in this order for fn arguments
+// return value is in RAX
+// https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI
+  "  leaq .AFL_SHM_ENV(%rip), %rdi\n"  // load effective address of __AFL_SHM_ID in rdi
   CALL_L64("getenv")
   "\n"
   "  testq %rax, %rax\n"
@@ -512,9 +517,9 @@ static const u8* main_payload_64 =
   "  movq  %rax, %rdi\n"
   CALL_L64("atoi")
   "\n"
-  "  xorq %rdx, %rdx   /* shmat flags    */\n"
-  "  xorq %rsi, %rsi   /* requested addr */\n"
-  "  movq %rax, %rdi   /* SHM ID         */\n"
+  "  xorq %rdx, %rdx   /* shmat flags    */\n"   // 0
+  "  xorq %rsi, %rsi   /* requested addr */\n"   // null
+  "  movq %rax, %rdi   /* SHM ID         */\n"   // parsed shm_id from env variable
   CALL_L64("shmat")
   "\n"
   "  cmpq $-1, %rax\n"
@@ -528,7 +533,7 @@ static const u8* main_payload_64 =
 #ifdef __APPLE__
   "  movq %rax, __afl_global_area_ptr(%rip)\n"
 #else
-  "  movq __afl_global_area_ptr@GOTPCREL(%rip), %rdx\n"
+  "  movq __afl_global_area_ptr@GOTPCREL(%rip), %rdx\n"   // https://stackoverflow.com/a/66713969
   "  movq %rax, (%rdx)\n"
 #endif /* ^__APPLE__ */
   "  movq %rax, %rdx\n"
@@ -719,7 +724,7 @@ static const u8* main_payload_64 =
   "  .comm    __afl_global_area_ptr, 8, 8\n"
   "\n"
   ".AFL_SHM_ENV:\n"
-  "  .asciz \"" SHM_ENV_VAR "\"\n"
+  "  .asciz \"" SHM_ENV_VAR "\"\n"  // declare a null-terminated string __AFL_SHM_ID
   "\n"
   "/* --- END --- */\n"
   "\n";
