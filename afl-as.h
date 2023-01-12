@@ -142,16 +142,16 @@ static const u8* trampoline_fmt_64 =
   "\n"
   ".align 4\n"
   "\n"
-  "leaq -(128+24)(%%rsp), %%rsp\n"
-  "movq %%rdx,  0(%%rsp)\n"
-  "movq %%rcx,  8(%%rsp)\n"
-  "movq %%rax, 16(%%rsp)\n"
-  "movq $0x%08x, %%rcx\n"
-  "call __afl_maybe_log\n"
-  "movq 16(%%rsp), %%rax\n"
-  "movq  8(%%rsp), %%rcx\n"
-  "movq  0(%%rsp), %%rdx\n"
-  "leaq (128+24)(%%rsp), %%rsp\n"
+  "leaq -(128+24)(%%rsp), %%rsp\n"   // rsp = rsp - (128+24)?  24 bytes for rax, rcx and rdx, 128 used by afl_maybe_log?
+  "movq %%rdx,  0(%%rsp)\n"          // move value of rdx to memory location in rsp
+  "movq %%rcx,  8(%%rsp)\n"          // move value of rcx to memory location in rsp+8
+  "movq %%rax, 16(%%rsp)\n"          // move value of rax to memory location in rsp+16
+  "movq $0x%08x, %%rcx\n"            // move a random() % MAP_SIZE value to rcx
+  "call __afl_maybe_log\n"           // call __afl_maybe_log function?
+  "movq 16(%%rsp), %%rax\n"          // restore value inside memory address rsp+16 back to rax
+  "movq  8(%%rsp), %%rcx\n"          // restore value inside memory address rsp+8 back to rcx
+  "movq  0(%%rsp), %%rdx\n"          // restore value inside memory address rsp+0 back to rdx
+  "leaq (128+24)(%%rsp), %%rsp\n"    // restore stack pointer value
   "\n"
   "/* --- END --- */\n"
   "\n";
